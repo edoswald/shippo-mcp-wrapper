@@ -202,6 +202,31 @@ export async function listCarrierAccounts() {
 }
 
 // ---------------------------------------------------------------------------
+// Orders
+// ---------------------------------------------------------------------------
+
+/**
+ * List orders from Shippo.
+ *
+ * @param {number} [results=25] - Number of results to return
+ * @param {string} [orderNumber] - Optional order number string filter
+ */
+export async function listOrders(results = 25, orderNumber = null) {
+  let path = `/orders/?results=${results}`;
+  if (orderNumber) path += `&order_number=${encodeURIComponent(orderNumber)}`;
+  return shippoRequest('GET', path);
+}
+
+/**
+ * Get a single Shippo order by its internal object ID.
+ *
+ * @param {string} orderId - Shippo order object ID
+ */
+export async function getOrder(orderId) {
+  return shippoRequest('GET', `/orders/${orderId}/`);
+}
+
+// ---------------------------------------------------------------------------
 // Parcels
 // ---------------------------------------------------------------------------
 

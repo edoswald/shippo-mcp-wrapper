@@ -25,6 +25,8 @@ import {
   trackShipment,
   listCarrierAccounts,
   createParcel,
+  listOrders,
+  getOrder,
 } from './shippo-client.js';
 
 // ---------------------------------------------------------------------------
@@ -419,6 +421,77 @@ function createMcpServer() {
     })
   );
 
+  // -------------------------------------------------------------------------
+  // list_shippo_orders
+  // -------------------------------------------------------------------------
+  server.tool(
+    'list_shippo_orders',
+    'List orders synced to Shippo from WooCommerce. Returns order numbers, status, recipient info, and line item counts. WooCommerce orders sync to Shippo automatically.',
+    {
+      results: z.number().int().min(1).max(100).default(25).describe('Number of orders to return (default 25, max 100)'),
+      order_number: z.string().optional().describe('Filter by order number string (partial match supported by Shippo)'),
+    },
+    safeToolHandler(async ({ results, order_number }) => {
+      const data = await listOrders(results ?? 25, order_number ?? null);
+      const orders = (data.results || []).map(o => ({
+        order_id: o.object_id,
+        order_number: o.order_number,
+        order_status: o.order_status,
+        placed_at: o.placed_at,
+        to_name: `${o.to_address?.name ?? ''}`.trim(),
+        to_city: o.to_address?.city,
+        to_state: o.to_address?.state,
+        line_item_count: (o.line_items || []).length,
+        total_price: o.total_price,
+        currency: o.currency,
+        weight: o.weight,
+        weight_unit: o.weight_unit,
+      }));
+      return ok({ success: true, orders, count: orders.length, total: data.count });
+    })
+  );
+
+  // -------------------------------------------------------------------------
+  // get_shippo_order
+  // -------------------------------------------------------------------------
+  server.tool(
+    'get_shippo_order',
+    "Get full details of a single Shippo order by Shippo's internal order object ID. Returns recipient address, line items, weight, and linked transactions (labels). Use list_shippo_orders to find the order_id.",
+    {
+      order_id: z.string().describe("Shippo order object ID (from list_shippo_orders — Shippo's internal ID, not WooCommerce order number)"),
+    },
+    safeToolHandler(async ({ order_id }) => {
+      const o = await getOrder(order_id);
+      return ok({
+        success: true,
+        order_id: o.object_id,
+        order_number: o.order_number,
+        order_status: o.order_status,
+        placed_at: o.placed_at,
+        to_address: o.to_address,
+        from_address: o.from_address,
+        line_items: (o.line_items || []).map(i => ({
+          title: i.title,
+          sku: i.sku,
+          quantity: i.quantity,
+          total_price: i.total_price,
+          currency: i.currency,
+          weight: i.weight,
+          weight_unit: i.weight_unit,
+        })),
+        total_price: o.total_price,
+        currency: o.currency,
+        weight: o.weight,
+        weight_unit: o.weight_unit,
+        transactions: o.transactions || [],
+        shipping_cost: o.shipping_cost,
+        shipping_cost_currency: o.shipping_cost_currency,
+        shipping_method: o.shipping_method,
+        notes: o.notes,
+      });
+    })
+  );
+
   return server;
 }
 
@@ -444,6 +517,8 @@ logger.info('Shippo MCP wrapper started', {
     'track_shipment',
     'list_carrier_accounts',
     'list_recent_shipments',
+    'list_shippo_orders',
+    'get_shippo_order',
   ],
   shippoAuth: process.env.SHIPPO_API_KEY
     ? 'api_key'
