@@ -27,6 +27,8 @@ import {
   createParcel,
   listOrders,
   getOrder,
+  getAddress,
+  listAddresses,
 } from './shippo-client.js';
 
 // ---------------------------------------------------------------------------
@@ -492,6 +494,112 @@ function createMcpServer() {
     })
   );
 
+  // -------------------------------------------------------------------------
+  // create_shippo_address
+  // -------------------------------------------------------------------------
+  server.tool(
+    'create_shippo_address',
+    'Create and validate a shipping address in Shippo. Always validates on creation. Returns the address ID for use in create_shipment. Use this to store reusable sender or recipient addresses.',
+    {
+      name: z.string().describe('Full name of the recipient or sender'),
+      street1: z.string().describe('Street address line 1'),
+      street2: z.string().optional().describe('Street address line 2 (apartment, suite, etc.)'),
+      city: z.string().describe('City'),
+      state: z.string().describe('State or province code (e.g. PA, CA)'),
+      zip: z.string().describe('ZIP or postal code'),
+      country: z.string().default('US').describe('ISO 2-letter country code (default: US)'),
+      phone: z.string().optional().describe('Phone number'),
+      email: z.string().optional().describe('Email address'),
+      company: z.string().optional().describe('Company name'),
+    },
+    safeToolHandler(async ({ name, street1, street2, city, state, zip, country, phone, email, company }) => {
+      const addressData = {
+        name,
+        street1,
+        ...(street2 && { street2 }),
+        city,
+        state,
+        zip,
+        country: country || 'US',
+        ...(phone && { phone }),
+        ...(email && { email }),
+        ...(company && { company }),
+      };
+      const result = await createAddress(addressData, true);
+      return ok({
+        success: true,
+        address_id: result.object_id,
+        is_complete: result.is_complete,
+        validation_results: result.validation_results,
+        name: result.name,
+        street1: result.street1,
+        street2: result.street2,
+        city: result.city,
+        state: result.state,
+        zip: result.zip,
+        country: result.country,
+      });
+    })
+  );
+
+  // -------------------------------------------------------------------------
+  // get_shippo_address
+  // -------------------------------------------------------------------------
+  server.tool(
+    'get_shippo_address',
+    'Get a stored Shippo address by its object ID. Returns all address fields and validation status.',
+    {
+      address_id: z.string().describe('Shippo address object ID (from create_shippo_address or validate_address)'),
+    },
+    safeToolHandler(async ({ address_id }) => {
+      const a = await getAddress(address_id);
+      return ok({
+        success: true,
+        address_id: a.object_id,
+        is_complete: a.is_complete,
+        validation_results: a.validation_results,
+        name: a.name,
+        company: a.company,
+        street1: a.street1,
+        street2: a.street2,
+        city: a.city,
+        state: a.state,
+        zip: a.zip,
+        country: a.country,
+        phone: a.phone,
+        email: a.email,
+        created: a.object_created,
+      });
+    })
+  );
+
+  // -------------------------------------------------------------------------
+  // list_shippo_addresses
+  // -------------------------------------------------------------------------
+  server.tool(
+    'list_shippo_addresses',
+    'List addresses stored in Shippo with optional name filter. Returns address IDs, names, and locations.',
+    {
+      name: z.string().optional().describe('Optional name filter to search addresses by recipient or sender name'),
+    },
+    safeToolHandler(async ({ name }) => {
+      const data = await listAddresses(name ?? null);
+      const addresses = (data.results || []).map(a => ({
+        address_id: a.object_id,
+        name: a.name,
+        company: a.company,
+        street1: a.street1,
+        city: a.city,
+        state: a.state,
+        zip: a.zip,
+        country: a.country,
+        is_complete: a.is_complete,
+        created: a.object_created,
+      }));
+      return ok({ success: true, addresses, count: addresses.length, total: data.count });
+    })
+  );
+
   return server;
 }
 
@@ -519,6 +627,9 @@ logger.info('Shippo MCP wrapper started', {
     'list_recent_shipments',
     'list_shippo_orders',
     'get_shippo_order',
+    'create_shippo_address',
+    'get_shippo_address',
+    'list_shippo_addresses',
   ],
   shippoAuth: process.env.SHIPPO_API_KEY
     ? 'api_key'

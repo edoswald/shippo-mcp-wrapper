@@ -226,6 +226,26 @@ export async function getOrder(orderId) {
   return shippoRequest('GET', `/orders/${orderId}/`);
 }
 
+/**
+ * Get a single Shippo address by ID.
+ *
+ * @param {string} addressId - Shippo address object ID
+ */
+export async function getAddress(addressId) {
+  return shippoRequest('GET', `/addresses/${addressId}/`);
+}
+
+/**
+ * List Shippo addresses with optional name filter.
+ *
+ * @param {string|null} [name] - Optional name string to filter by
+ */
+export async function listAddresses(name = null) {
+  let path = '/addresses/';
+  if (name) path += `?name=${encodeURIComponent(name)}`;
+  return shippoRequest('GET', path);
+}
+
 // ---------------------------------------------------------------------------
 // Parcels
 // ---------------------------------------------------------------------------
