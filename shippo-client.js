@@ -263,3 +263,29 @@ export async function createParcel(length, width, height, distanceUnit, weight, 
     mass_unit: massUnit,
   });
 }
+
+/**
+ * List orders with pagination support.
+ *
+ * @param {number} [results=25] - Number of results per page
+ * @param {number} [page] - Page number
+ * @param {string} [order_status] - Optional order status filter
+ */
+export async function listOrdersPaginated({ page, results = 25, order_status } = {}) {
+  const params = new URLSearchParams({ results });
+  if (page) params.set('page', page);
+  if (order_status) params.set('order_status', order_status);
+  return shippoRequest('GET', `/orders/?${params}`);
+}
+
+/**
+ * List addresses with pagination support.
+ *
+ * @param {number} [results=25] - Number of results per page
+ * @param {number} [page] - Page number
+ */
+export async function listAddressesPaginated({ page, results = 25 } = {}) {
+  const params = new URLSearchParams({ results });
+  if (page) params.set('page', page);
+  return shippoRequest('GET', `/addresses/?${params}`);
+}

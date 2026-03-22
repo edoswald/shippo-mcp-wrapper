@@ -26,9 +26,11 @@ import {
   listCarrierAccounts,
   createParcel,
   listOrders,
+  listOrdersPaginated,
   getOrder,
   getAddress,
   listAddresses,
+  listAddressesPaginated,
 } from './shippo-client.js';
 
 // ---------------------------------------------------------------------------
@@ -428,28 +430,19 @@ function createMcpServer() {
   // -------------------------------------------------------------------------
   server.tool(
     'list_shippo_orders',
-    'List orders synced to Shippo from WooCommerce. Returns order numbers, status, recipient info, and line item counts. WooCommerce orders sync to Shippo automatically.',
+    'List Shippo orders with optional pagination and status filtering.',
     {
-      results: z.number().int().min(1).max(100).default(25).describe('Number of orders to return (default 25, max 100)'),
-      order_number: z.string().optional().describe('Filter by order number string (partial match supported by Shippo)'),
+      page: z.number().int().positive().optional(),
+      results: z.number().int().positive().optional().default(25),
+      order_status: z.string().optional(),
     },
-    safeToolHandler(async ({ results, order_number }) => {
-      const data = await listOrders(results ?? 25, order_number ?? null);
-      const orders = (data.results || []).map(o => ({
-        order_id: o.object_id,
-        order_number: o.order_number,
-        order_status: o.order_status,
-        placed_at: o.placed_at,
-        to_name: `${o.to_address?.name ?? ''}`.trim(),
-        to_city: o.to_address?.city,
-        to_state: o.to_address?.state,
-        line_item_count: (o.line_items || []).length,
-        total_price: o.total_price,
-        currency: o.currency,
-        weight: o.weight,
-        weight_unit: o.weight_unit,
-      }));
-      return ok({ success: true, orders, count: orders.length, total: data.count });
+    safeToolHandler(async ({ page, results, order_status }) => {
+      try {
+        const data = await listOrdersPaginated({ page, results, order_status });
+        return ok(data);
+      } catch (err) {
+        return ok({ error: err.message, exit_reason: 'shippo_api_error' });
+      }
     })
   );
 
@@ -458,39 +451,20 @@ function createMcpServer() {
   // -------------------------------------------------------------------------
   server.tool(
     'get_shippo_order',
-    "Get full details of a single Shippo order by Shippo's internal order object ID. Returns recipient address, line items, weight, and linked transactions (labels). Use list_shippo_orders to find the order_id.",
+    'Get full details of a single Shippo order by its object ID.',
     {
-      order_id: z.string().describe("Shippo order object ID (from list_shippo_orders — Shippo's internal ID, not WooCommerce order number)"),
+      order_id: z.string(),
     },
     safeToolHandler(async ({ order_id }) => {
-      const o = await getOrder(order_id);
-      return ok({
-        success: true,
-        order_id: o.object_id,
-        order_number: o.order_number,
-        order_status: o.order_status,
-        placed_at: o.placed_at,
-        to_address: o.to_address,
-        from_address: o.from_address,
-        line_items: (o.line_items || []).map(i => ({
-          title: i.title,
-          sku: i.sku,
-          quantity: i.quantity,
-          total_price: i.total_price,
-          currency: i.currency,
-          weight: i.weight,
-          weight_unit: i.weight_unit,
-        })),
-        total_price: o.total_price,
-        currency: o.currency,
-        weight: o.weight,
-        weight_unit: o.weight_unit,
-        transactions: o.transactions || [],
-        shipping_cost: o.shipping_cost,
-        shipping_cost_currency: o.shipping_cost_currency,
-        shipping_method: o.shipping_method,
-        notes: o.notes,
-      });
+      try {
+        const o = await getOrder(order_id);
+        return ok(o);
+      } catch (err) {
+        if (err.status === 404) {
+          return ok({ error: 'Order not found', exit_reason: 'not_found' });
+        }
+        return ok({ error: err.message, exit_reason: 'shippo_api_error' });
+      }
     })
   );
 
@@ -499,46 +473,28 @@ function createMcpServer() {
   // -------------------------------------------------------------------------
   server.tool(
     'create_shippo_address',
-    'Create and validate a shipping address in Shippo. Always validates on creation. Returns the address ID for use in create_shipment. Use this to store reusable sender or recipient addresses.',
+    'Create a new Shippo address object with optional validation.',
     {
-      name: z.string().describe('Full name of the recipient or sender'),
-      street1: z.string().describe('Street address line 1'),
-      street2: z.string().optional().describe('Street address line 2 (apartment, suite, etc.)'),
-      city: z.string().describe('City'),
-      state: z.string().describe('State or province code (e.g. PA, CA)'),
-      zip: z.string().describe('ZIP or postal code'),
-      country: z.string().default('US').describe('ISO 2-letter country code (default: US)'),
-      phone: z.string().optional().describe('Phone number'),
-      email: z.string().optional().describe('Email address'),
-      company: z.string().optional().describe('Company name'),
+      name: z.string(),
+      street1: z.string(),
+      city: z.string(),
+      state: z.string(),
+      zip: z.string(),
+      country: z.string(),
+      phone: z.string().optional(),
+      email: z.string().optional(),
+      validate: z.boolean().optional().default(false),
     },
-    safeToolHandler(async ({ name, street1, street2, city, state, zip, country, phone, email, company }) => {
-      const addressData = {
-        name,
-        street1,
-        ...(street2 && { street2 }),
-        city,
-        state,
-        zip,
-        country: country || 'US',
-        ...(phone && { phone }),
-        ...(email && { email }),
-        ...(company && { company }),
-      };
-      const result = await createAddress(addressData, true);
-      return ok({
-        success: true,
-        address_id: result.object_id,
-        is_complete: result.is_complete,
-        validation_results: result.validation_results,
-        name: result.name,
-        street1: result.street1,
-        street2: result.street2,
-        city: result.city,
-        state: result.state,
-        zip: result.zip,
-        country: result.country,
-      });
+    safeToolHandler(async ({ name, street1, city, state, zip, country, phone, email, validate }) => {
+      if (process.env.TEST_MODE === 'true') {
+        return ok({ object_id: 'test_address_id', test_mode: true, message: 'TEST MODE: would have created address' });
+      }
+      try {
+        const result = await createAddress({ name, street1, city, state, zip, country, phone, email }, validate);
+        return ok(result);
+      } catch (err) {
+        return ok({ error: err.message, exit_reason: 'shippo_api_error' });
+      }
     })
   );
 
@@ -547,29 +503,20 @@ function createMcpServer() {
   // -------------------------------------------------------------------------
   server.tool(
     'get_shippo_address',
-    'Get a stored Shippo address by its object ID. Returns all address fields and validation status.',
+    'Retrieve a saved Shippo address by its object ID.',
     {
-      address_id: z.string().describe('Shippo address object ID (from create_shippo_address or validate_address)'),
+      address_id: z.string(),
     },
     safeToolHandler(async ({ address_id }) => {
-      const a = await getAddress(address_id);
-      return ok({
-        success: true,
-        address_id: a.object_id,
-        is_complete: a.is_complete,
-        validation_results: a.validation_results,
-        name: a.name,
-        company: a.company,
-        street1: a.street1,
-        street2: a.street2,
-        city: a.city,
-        state: a.state,
-        zip: a.zip,
-        country: a.country,
-        phone: a.phone,
-        email: a.email,
-        created: a.object_created,
-      });
+      try {
+        const a = await getAddress(address_id);
+        return ok(a);
+      } catch (err) {
+        if (err.status === 404) {
+          return ok({ error: 'Address not found', exit_reason: 'not_found' });
+        }
+        return ok({ error: err.message, exit_reason: 'shippo_api_error' });
+      }
     })
   );
 
@@ -578,25 +525,18 @@ function createMcpServer() {
   // -------------------------------------------------------------------------
   server.tool(
     'list_shippo_addresses',
-    'List addresses stored in Shippo with optional name filter. Returns address IDs, names, and locations.',
+    'List saved Shippo addresses with optional pagination.',
     {
-      name: z.string().optional().describe('Optional name filter to search addresses by recipient or sender name'),
+      page: z.number().int().positive().optional(),
+      results: z.number().int().positive().optional().default(25),
     },
-    safeToolHandler(async ({ name }) => {
-      const data = await listAddresses(name ?? null);
-      const addresses = (data.results || []).map(a => ({
-        address_id: a.object_id,
-        name: a.name,
-        company: a.company,
-        street1: a.street1,
-        city: a.city,
-        state: a.state,
-        zip: a.zip,
-        country: a.country,
-        is_complete: a.is_complete,
-        created: a.object_created,
-      }));
-      return ok({ success: true, addresses, count: addresses.length, total: data.count });
+    safeToolHandler(async ({ page, results }) => {
+      try {
+        const data = await listAddressesPaginated({ page, results });
+        return ok(data);
+      } catch (err) {
+        return ok({ error: err.message, exit_reason: 'shippo_api_error' });
+      }
     })
   );
 
