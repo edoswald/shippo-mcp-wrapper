@@ -2,7 +2,7 @@
  * SSE Transport Server — Shippo MCP Wrapper
  *
  * Exposes a header-authenticated SSE endpoint for Retell (and other MCP clients)
- * to connect to. Auth via Bearer token (Authorization or authentication header).
+ * to connect to. Auth via Bearer token (Authorization header).
  *
  * Endpoints:
  *   GET  /sse      - SSE stream
@@ -52,7 +52,7 @@ function identifyClient(req) {
 
   let provided = null;
   const authHeader =
-    req.headers['authorization'] || req.headers['authentication'] || '';
+    req.headers['authorization'] || '';
   if (authHeader.startsWith('Bearer ')) {
     provided = authHeader.slice(7).trim();
   } else {
