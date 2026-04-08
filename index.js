@@ -379,7 +379,7 @@ function createMcpServer() {
   server.tool(
     'list_carrier_accounts',
     'List all carrier accounts connected to the Shippo account (USPS, FedEx, UPS, etc.). Returns carrier names, account numbers, and active status.',
-    {},
+    z.object({}),
     safeToolHandler(async () => {
       const data = await listCarrierAccounts();
       const accounts = (data.results || []).map(a => ({
