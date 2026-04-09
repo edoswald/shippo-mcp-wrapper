@@ -16,6 +16,10 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { createServer } from 'http';
 import { logger } from './logger.js';
 import crypto from 'crypto';
+import { createRateLimiter } from './rate-limiter.js';
+
+const globalLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 200 });
+const authLimiter   = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 30 });
 
 const PORT = process.env.PORT || 3000;
 const MAX_CONNECTIONS = parseInt(process.env.MAX_CONNECTIONS || '20', 10);
@@ -102,6 +106,15 @@ export function startSseServer(createMcpServer) {
     const url = new URL(req.url, 'http://localhost');
 
     logger.info('Request', { method: req.method, path: url.pathname });
+
+    // -----------------------------------------------------------------------
+    // Rate limiting — before health check and auth gate
+    // -----------------------------------------------------------------------
+    if (!globalLimiter.check(req, res)) return;
+
+    if (url.pathname === '/sse' || (url.pathname === '/' && req.method === 'POST')) {
+      if (!authLimiter.check(req, res, { errorMessage: 'Too many authentication attempts, please try again later.' })) return;
+    }
 
     // -----------------------------------------------------------------------
     // Health check — no auth
